@@ -140,7 +140,17 @@ run_mode() {
 }
 
 log "cell $cell"
-if bash "$PADDOCK_ROOT/scripts/ci/install-openshell.sh" "$version" >"$PADDOCK_LOG_DIR/install.log" 2>&1; then
+# PADDOCK_PREINSTALLED=1: an earlier workflow step without secrets installed
+# OpenShell and the prover, so third-party installers never see a credential.
+preinstalled="${PADDOCK_PREINSTALLED:-0}"
+if [ "$preinstalled" = 1 ]; then
+  if openshell_is "$version"; then
+    record_check setup pass "OpenShell $version (preinstalled)"
+  else
+    record_check setup error "preinstalled OpenShell is not $version: $(openshell --version 2>&1)"
+    exit 1
+  fi
+elif bash "$PADDOCK_ROOT/scripts/ci/install-openshell.sh" "$version" >"$PADDOCK_LOG_DIR/install.log" 2>&1; then
   record_check setup pass "OpenShell $version"
 else
   record_check setup error "installing OpenShell $version failed; see install.log"
@@ -148,7 +158,7 @@ else
 fi
 XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR
-if [ "$version" = "$primary" ] &&
+if [ "$version" = "$primary" ] && [ "$preinstalled" != 1 ] &&
   ! bash "$PADDOCK_ROOT/scripts/ci/install-prover.sh" "$version" >"$PADDOCK_LOG_DIR/prover-install.log" 2>&1; then
   record_check prover-setup error "installing openshell-prover failed; see prover-install.log"
 fi
