@@ -84,7 +84,7 @@ prover_check() {
 }
 
 run_mode() {
-  local mode="$1" provider_file="$2"
+  local mode="$1" provider_file="$2" dummy_credential="$3"
   local sandbox provider="paddock-${bundle}-${mode}"
   sandbox="$(sandbox_name "$bundle" "$mode")"
   eval "$(paddock_py provider-info "$provider_file")"
@@ -109,7 +109,7 @@ run_mode() {
       fi
       cred_args+=(--credential "$env_name")
     else
-      cred_args+=(--credential "$env_name=paddock-ci-dummy-credential")
+      cred_args+=(--credential "$env_name=$dummy_credential")
     fi
   done
   if openshell provider create --name "$provider" --type "$PROFILE_ID" "${cred_args[@]}" \
@@ -176,5 +176,5 @@ if [ "$PADDOCK_DISTRIBUTION" != upstream ]; then
 fi
 
 for i in "${!PADDOCK_AUTH_MODES[@]}"; do
-  run_mode "${PADDOCK_AUTH_MODES[$i]}" "$bundle_dir/${PADDOCK_PROVIDER_FILES[$i]}"
+  run_mode "${PADDOCK_AUTH_MODES[$i]}" "$bundle_dir/${PADDOCK_PROVIDER_FILES[$i]}" "${PADDOCK_DUMMY_CREDENTIALS[$i]}"
 done

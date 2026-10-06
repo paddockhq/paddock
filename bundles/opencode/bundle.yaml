@@ -16,3 +16,7 @@ env:
 auth:
   - mode: api-key
     provider_file: providers/opencode-openrouter.yaml
+    # OpenRouter answers a key that is not shaped like sk-or-v1-<64 hex> with
+    # "Missing Authentication header", as if no key were sent. This fake key has
+    # the real shape, so CI sees OpenRouter's unknown-key error instead.
+    dummy_credential: "sk-or-v1-{0*64}"

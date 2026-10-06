@@ -61,8 +61,9 @@ if [ "$PADDOCK_LIVE" = 1 ]; then
     record_check "live-answer:$mode" fail "exit $rc: $(tail -n 3 <<<"$out")"
   fi
 elif grep -qi 'missing authentication header' <<<"$out"; then
-  # OpenShell only swaps a placeholder the client sends; it never adds the header.
-  record_check "upstream-auth-error:$mode" fail "OpenRouter received no Authorization header: opencode did not send the key"
+  # OpenRouter says this when the header is absent or the key is not shaped like
+  # an OpenRouter key; either way no usable credential arrived.
+  record_check "upstream-auth-error:$mode" fail "OpenRouter got no usable credential (header missing or key not shaped like sk-or-v1-...)"
 elif [ "$rc" -ne 0 ] && grep -qiE 'user not found|invalid api key' <<<"$out"; then
   # OpenRouter's answer to a well-formed but unknown key. A CLI failure also
   # exits non-zero, so the message itself is required.
