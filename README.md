@@ -8,6 +8,12 @@ Tested, least-privilege bundles for running AI coding agents inside
 PadDock is an independent community project. It is not affiliated with or
 endorsed by NVIDIA.
 
+## Bundles
+
+| Agent | Bundle | Auth |
+|---|---|---|
+| OpenCode 2.0.21 | [bundles/opencode](bundles/opencode) | OpenRouter API key |
+
 ## Layout
 
 - `bundles/<agent>/`: one bundle per agent (image reference, sandbox policy,

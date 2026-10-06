@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2026 The PadDock Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# PadDock provider profile, derived from OpenShell v0.1.2 providers/openrouter.yaml.
+# Import it with:
+#   openshell provider profile lint   -f providers/opencode-openrouter.yaml
+#   openshell provider profile import -f providers/opencode-openrouter.yaml
+#
+# Client binaries:   opencode.
+# Reference layout:  ghcr.io/anomalyco/opencode 2.x, where /usr/local/bin/opencode
+#                    is a regular file (not a symlink).
+# Credential scope:  OPENROUTER_API_KEY, sent as "Authorization: Bearer" to the
+#                    endpoint below and nowhere else.
+# Endpoint access:   openrouter.ai, POST /api/v1/chat/completions only. NVIDIA's
+#                    example grants read-write access to every path on the host.
+# Smoke test:        opencode run --standalone -m openrouter/nvidia/nemotron-3.5-lightning:free "Reply with exactly: OK"
+id: paddock-opencode-openrouter
+display_name: OpenRouter for OpenCode (PadDock)
+description: OpenRouter chat completions for the OpenCode CLI, least privilege
+category: inference
+inference_capable: true
+credentials:
+  - name: api_key
+    description: OpenRouter API key
+    env_vars: [OPENROUTER_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+discovery:
+  credentials: [api_key]
+endpoints:
+  - host: openrouter.ai
+    port: 443
+    protocol: rest
+    enforcement: enforce
+    rules:
+      - allow:
+          method: POST
+          path: /api/v1/chat/completions
+binaries: [/usr/local/bin/opencode]

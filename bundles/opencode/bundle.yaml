@@ -1,0 +1,18 @@
+schema: 1
+name: opencode
+agent:
+  display_name: OpenCode
+  homepage: https://github.com/anomalyco/opencode
+  license: MIT
+  version: "2.0.21"
+distribution: upstream
+image: ghcr.io/anomalyco/opencode:2.0.21@sha256:6d3cebbaaeed11b9dd1ea6d2ca8a3ec17eb548c5aed37e17c7ae80fd8b2f22b2
+revision: 1
+command: [opencode]
+version_command: [opencode, --version]
+env:
+  OPENCODE_DISABLE_MODELS_FETCH: "1"
+  OPENCODE_DISABLE_AUTOUPDATE: "1"
+auth:
+  - mode: api-key
+    provider_file: providers/opencode-openrouter.yaml
