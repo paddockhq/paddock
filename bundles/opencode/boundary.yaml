@@ -1,0 +1,36 @@
+# The most access PadDock ever accepts for the OpenCode bundle (spec §6.4).
+# CI checks the gateway-composed policy against this file with openshell-prover.
+# Changing this file needs maintainer review; it is never merged automatically.
+version: 1
+filesystem_policy:
+  include_workdir: false
+  read_only:
+    - /usr
+    - /lib
+    - /bin
+    - /etc
+    - /proc
+    - /dev/urandom
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+landlock:
+  compatibility: best_effort
+process:
+  run_as_user: "1000"
+  run_as_group: "1000"
+network_policies:
+  openrouter_chat:
+    name: openrouter-chat
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow:
+              method: POST
+              path: /api/v1/chat/completions
+    binaries:
+      - path: /usr/local/bin/opencode
