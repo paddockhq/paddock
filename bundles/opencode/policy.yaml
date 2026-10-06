@@ -11,6 +11,7 @@ filesystem_policy:
     - /etc
     - /proc
     - /dev/urandom
+    - /var/log      # OpenShell baseline path; the gateway adds it to every sandbox
   read_write:
     - /sandbox      # working folder and HOME for UID 1000: OpenCode state lives here
     - /tmp          # Bun extracts native code here at start-up

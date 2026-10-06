@@ -11,6 +11,7 @@ filesystem_policy:
     - /etc
     - /proc
     - /dev/urandom
+    - /var/log
   read_write:
     - /sandbox
     - /tmp
