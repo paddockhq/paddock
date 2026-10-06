@@ -25,7 +25,17 @@ else
   record_check "state-writable:$mode" fail "$out"
 fi
 
-# 3. A real request reaches OpenRouter, and nothing else is contacted.
+# 3. The sandbox sees only OpenShell's placeholder, never the key itself. The
+#    proxy swaps the placeholder in the Authorization header on the way out.
+# shellcheck disable=SC2016  # the variable must expand inside the sandbox
+key_in_sandbox="$(sb_exec "$sb" 30 "${PADDOCK_ENV_ARGS[@]}" -- sh -c 'printf "%s" "${OPENROUTER_API_KEY:-}"' 2>&1)"
+case "$key_in_sandbox" in
+  openshell:resolve:env:*) record_check "credential-placeholder:$mode" pass "" ;;
+  "") record_check "credential-placeholder:$mode" fail "OPENROUTER_API_KEY is not set inside the sandbox" ;;
+  *) record_check "credential-placeholder:$mode" fail "OPENROUTER_API_KEY inside the sandbox is not an OpenShell placeholder" ;;
+esac
+
+# 4. A real request reaches OpenRouter, and nothing else is contacted.
 #    CI uses a dummy key, so OpenRouter answers 401 and opencode exits non-zero.
 #    The live smoke test (--live) uses a real key and expects an answer.
 rc=0
@@ -50,8 +60,13 @@ if [ "$PADDOCK_LIVE" = 1 ]; then
   else
     record_check "live-answer:$mode" fail "exit $rc: $(tail -n 3 <<<"$out")"
   fi
-elif [ "$rc" -ne 0 ] && grep -qiE '401|user not found|unauthori[sz]ed|authentication' <<<"$out"; then
-  # A CLI failure also exits non-zero, so require OpenRouter's auth error in the output.
+elif grep -qi 'missing authentication header' <<<"$out"; then
+  # OpenRouter says this when the header is absent or the key is not shaped like
+  # an OpenRouter key; either way no usable credential arrived.
+  record_check "upstream-auth-error:$mode" fail "OpenRouter got no usable credential (header missing or key not shaped like sk-or-v1-...)"
+elif [ "$rc" -ne 0 ] && grep -qiE 'user not found|invalid api key' <<<"$out"; then
+  # OpenRouter's answer to a well-formed but unknown key. A CLI failure also
+  # exits non-zero, so the message itself is required.
   record_check "upstream-auth-error:$mode" pass "exit $rc with the dummy key, as expected"
 else
   record_check "upstream-auth-error:$mode" fail "expected OpenRouter's auth error with the dummy key; got exit $rc: $(tail -n 3 <<<"$out")"

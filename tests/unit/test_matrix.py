@@ -83,3 +83,9 @@ def test_matrix_command_uses_changed_files(make_bundle, tmp_path, capsys):
     assert rc == 0
     cells = json.loads(capsys.readouterr().out)["include"]
     assert [cell["bundle"] for cell in cells] == ["demo", "demo"]
+
+
+def test_empty_changed_list_means_every_bundle():
+    # A pull request always changes at least one file. An empty list means the
+    # diff failed, so test everything rather than skip every cell.
+    assert affected_bundles(["b", "a"], []) == ["a", "b"]

@@ -38,7 +38,8 @@
         "required": ["mode", "provider_file"],
         "properties": {
           "mode": { "enum": ["api-key", "subscription"] },
-          "provider_file": { "type": "string", "pattern": "^providers/[a-z0-9-]+\\.yaml$" }
+          "provider_file": { "type": "string", "pattern": "^providers/[a-z0-9-]+\\.yaml$" },
+          "dummy_credential": { "type": "string", "pattern": "^([A-Za-z0-9._-]|\\{[A-Za-z0-9]\\*[0-9]{1,3}\\})+$" }
         }
       }
     }

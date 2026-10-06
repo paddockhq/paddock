@@ -62,3 +62,45 @@ def test_events_command_formats(tmp_path, capsys):
     assert capsys.readouterr().out == "api.github.com:443\nhttpbin.org:443\n"
     assert main(["events", "--log", str(log), "--host", "api.github.com", "--format", "count"]) == 0
     assert capsys.readouterr().out == "2\n"
+
+
+# Real OpenShell v0.1.2 lines captured by the M0 run (docs/decisions/0001-ci-runners.md).
+DNS_REFUSE = (
+    "[1791294561.295] [sandbox] [OCSF ] [ocsf] NET:REFUSE [MED] DENIED example.com "
+    "[reason:policy_dns_ineligible]"
+)
+V012_DENIED = (
+    "[1791294561.297] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /usr/bin/curl(0) -> "
+    "example.com:443 [reason:transparent_tcp_policy_denied]"
+)
+
+
+def test_parses_real_v012_denial_lines():
+    events = parse_events("\n".join([DNS_REFUSE, V012_DENIED]))
+    assert [(e.kind, e.action, e.host, e.port, e.binary) for e in events] == [
+        ("NET", "DENIED", "example.com", None, None),
+        ("NET", "DENIED", "example.com", 443, "/usr/bin/curl"),
+    ]
+
+
+def test_unbracketed_ipv6_is_never_attributed_to_a_partial_host():
+    line = "NET:OPEN [MED] DENIED /usr/bin/curl(7) -> 2001:4860:4860::8888:443 [policy:-]"
+    events = parse_events(line)
+    assert len(events) == 1
+    assert events[0].action == "DENIED"
+    assert events[0].host not in {"2001", "4860"}
+
+
+def test_unrecognised_denial_lines_are_kept_as_unparsed_denials():
+    lines = [
+        "NET:OPEN [MED] DENIED /opt/my app/bin(7) -> evil.example:443 [policy:-]",
+        "HTTP:GET [MED] DENIED GET http://[::1:443/x [policy:-]",
+        "HTTP:GET [MED] DENIED GET http://evil.example:99999/x [policy:-]",
+    ]
+    events = parse_events("\n".join(lines))
+    assert [(e.action, e.host) for e in events] == [("DENIED", "<unparsed>")] * 3
+    assert select(events, action="DENIED")
+
+
+def test_unrecognised_allowed_lines_are_ignored():
+    assert parse_events("NET:OPEN [INFO] ALLOWED weird line without arrow") == []

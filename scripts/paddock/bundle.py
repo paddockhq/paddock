@@ -13,6 +13,16 @@ SCHEMA_PATH = Path(__file__).with_name("bundle.schema.json")
 DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 REQUIRED_FILES = ("policy.yaml", "boundary.yaml", "tests/allow.sh", "README.md")
 LF_ONLY_SUFFIXES = (".sh", ".yaml", ".yml")
+# Credential value CI gives the provider when it runs without real keys.
+DEFAULT_DUMMY_CREDENTIAL = "paddock-ci-dummy-credential"
+# In dummy_credential, {c*N} stands for N copies of c, so a fake key in a
+# provider's real format never has to be committed (push protection flags it).
+REPEAT_RE = re.compile(r"\{([A-Za-z0-9])\*([0-9]{1,3})\}")
+
+
+def dummy_credential(entry):
+    template = entry.get("dummy_credential", DEFAULT_DUMMY_CREDENTIAL)
+    return REPEAT_RE.sub(lambda m: m[1] * int(m[2]), template)
 
 
 class BundleError(Exception):
@@ -62,6 +72,13 @@ def _check_files(bundle_dir, meta):
     for entry in meta["auth"]:
         if not (bundle_dir / entry["provider_file"]).is_file():
             problems.append(f"missing provider file {entry['provider_file']}")
+    for rel in ("policy.yaml", "boundary.yaml"):
+        path = bundle_dir / rel
+        if path.is_file():
+            policy = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if (policy.get("landlock") or {}).get("compatibility") != "hard_requirement":
+                # best_effort lets a sandbox start with filesystem rules silently skipped.
+                problems.append(f"{rel}: landlock.compatibility must be hard_requirement")
     for path in sorted(bundle_dir.rglob("*")):
         if path.is_file() and (path.suffix in LF_ONLY_SUFFIXES or path.name == "Dockerfile"):
             if b"\r\n" in path.read_bytes():
@@ -98,6 +115,7 @@ def shell_assignments(meta):
         array("PADDOCK_ENV_ARGS", env_args),
         array("PADDOCK_AUTH_MODES", [entry["mode"] for entry in meta["auth"]]),
         array("PADDOCK_PROVIDER_FILES", [entry["provider_file"] for entry in meta["auth"]]),
+        array("PADDOCK_DUMMY_CREDENTIALS", [dummy_credential(entry) for entry in meta["auth"]]),
     ]
     return "\n".join(lines) + "\n"
 

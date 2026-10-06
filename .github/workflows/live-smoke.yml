@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# bash -eo pipefail, so a failed command in a pipeline fails its step.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: live-smoke
   cancel-in-progress: false
@@ -35,12 +40,29 @@ jobs:
             echo "::error::OpenRouter no longer lists $model. Pick another free model that OpenCode's bundled catalog knows and update OPENCODE_TEST_MODEL."
             exit 1
           fi
+      - name: Install OpenShell and the prover (this step has no secrets)
+        run: |
+          version="$(jq -r '.versions[0]' scripts/ci/openshell-versions.json)"
+          bash scripts/ci/install-openshell.sh "$version"
+          bash scripts/ci/install-prover.sh "$version"
       - name: Run the OpenCode bundle with a real key
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PADDOCK_PREINSTALLED: '1'
         run: |
           version="$(jq -r '.versions[0]' scripts/ci/openshell-versions.json)"
           bash scripts/ci/run-cell.sh opencode "$version" ubuntu-24.04 --live
+      - name: Check that no saved file contains the key
+        if: always()
+        env:
+          KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # GitHub masks secrets in step logs, not inside uploaded artifacts.
+          if [ -n "$KEY" ] && [ -d results ] && grep -rlF -- "$KEY" results; then
+            echo "::error::The API key appears in the files listed above. The results will not be uploaded."
+            rm -rf results
+            exit 1
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

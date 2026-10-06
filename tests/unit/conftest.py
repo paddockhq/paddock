@@ -22,8 +22,8 @@ VALID_META = {
 }
 
 DEFAULT_FILES = {
-    "policy.yaml": "version: 1\n",
-    "boundary.yaml": "version: 1\n",
+    "policy.yaml": "version: 1\nlandlock:\n  compatibility: hard_requirement\n",
+    "boundary.yaml": "version: 1\nlandlock:\n  compatibility: hard_requirement\n",
     "providers/demo-apikey.yaml": "id: demo-apikey\n",
     "tests/allow.sh": "#!/usr/bin/env bash\n",
     "README.md": "# demo\n",

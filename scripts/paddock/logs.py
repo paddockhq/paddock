@@ -7,11 +7,19 @@ from urllib.parse import urlsplit
 
 _NET = re.compile(
     r"\bNET:(?P<op>[A-Z]+) \[[A-Z]+\] (?P<action>ALLOWED|DENIED|BLOCKED) "
-    r"(?P<binary>\S+?)\((?P<pid>\d+)\) -> (?P<host>\[[^\]]+\]|[^\s:/]+):(?P<port>\d+)"
+    r"(?P<binary>\S+?)\((?P<pid>\d+)\) -> (?P<host>\[[^\]]+\]|[^\s/]+?):(?P<port>\d+)(?=[\s/]|$)"
+)
+# A DNS refusal names only the host: NET:REFUSE [MED] DENIED example.com [reason:...]
+_NET_HOST = re.compile(
+    r"\bNET:(?P<op>[A-Z]+) \[[A-Z]+\] (?P<action>DENIED|BLOCKED) "
+    r"(?P<host>[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?=\s\[|$)"
 )
 _HTTP = re.compile(
     r"\bHTTP:(?P<method>[A-Z]+) \[[A-Z]+\] (?P<action>ALLOWED|DENIED|BLOCKED) (?P=method) (?P<url>\S+)"
 )
+# Any denial line the patterns above cannot read. It is kept, so callers fail closed.
+_DENIAL = re.compile(r"\b(?P<kind>NET|HTTP):[A-Z]+ \[[A-Z]+\] (?P<action>DENIED|BLOCKED)\b")
+UNPARSED = "<unparsed>"
 
 
 @dataclass(frozen=True)
@@ -25,17 +33,34 @@ class Event:
     line: str
 
 
+def _http_event(match, line):
+    try:
+        url = urlsplit(match["url"])
+        port = url.port
+    except ValueError:
+        return None
+    if not url.hostname:
+        return None
+    return Event("HTTP", match["action"], url.hostname, port, None, match["method"], line)
+
+
 def parse_events(text):
     events = []
     for line in text.splitlines():
+        event = None
         if match := _NET.search(line):
-            events.append(Event(
+            event = Event(
                 "NET", match["action"], match["host"].strip("[]"), int(match["port"]),
                 match["binary"], None, line,
-            ))
+            )
+        elif match := _NET_HOST.search(line):
+            event = Event("NET", match["action"], match["host"].strip("[]"), None, None, None, line)
         elif match := _HTTP.search(line):
-            url = urlsplit(match["url"])
-            events.append(Event("HTTP", match["action"], url.hostname or "", url.port, None, match["method"], line))
+            event = _http_event(match, line)
+        if event is None and (match := _DENIAL.search(line)):
+            event = Event(match["kind"], match["action"], UNPARSED, None, None, None, line)
+        if event is not None:
+            events.append(event)
     return events
 
 

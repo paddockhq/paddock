@@ -148,3 +148,31 @@ def test_validate_command_passes_valid_bundles(make_bundle, tmp_path, capsys):
 def test_validate_command_without_bundles(tmp_path, capsys):
     assert main(["validate", "--root", str(tmp_path)]) == 0
     assert "no bundles found" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("policy", [
+    "version: 1\nlandlock:\n  compatibility: best_effort\n",
+    "version: 1\n",
+])
+def test_landlock_must_be_a_hard_requirement(make_bundle, policy):
+    # best_effort lets a sandbox start with filesystem rules silently skipped.
+    with pytest.raises(BundleError, match="policy.yaml: landlock.compatibility must be hard_requirement"):
+        load_bundle(make_bundle(files={"policy.yaml": policy}))
+
+
+def test_dummy_credential_is_exported_per_auth_mode(valid_meta):
+    # Some upstreams answer a badly shaped key as if no key were sent, so a bundle
+    # can give CI a fake key in the provider's own format.
+    valid_meta["auth"] = [
+        {"mode": "api-key", "provider_file": "providers/demo-apikey.yaml", "dummy_credential": "sk-demo-{0*4}x"},
+        {"mode": "subscription", "provider_file": "providers/demo-sub.yaml"},
+    ]
+    out = shell_assignments(valid_meta)
+    # {c*N} repeats c N times, so no key-shaped string has to be committed.
+    assert "PADDOCK_DUMMY_CREDENTIALS=(sk-demo-0000x paddock-ci-dummy-credential)\n" in out
+
+
+def test_dummy_credential_rejects_shell_and_space_characters(make_bundle, valid_meta):
+    valid_meta["auth"][0]["dummy_credential"] = "sk $(id)"
+    with pytest.raises(BundleError, match="dummy_credential"):
+        load_bundle(make_bundle(valid_meta))

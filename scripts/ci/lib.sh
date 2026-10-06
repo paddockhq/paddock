@@ -99,3 +99,8 @@ sandbox_name() {
   hash="$(printf '%s/%s' "$1" "$2" | sha256sum | cut -c1-6)"
   printf '%s-%s\n' "${1:0:12}" "$hash"
 }
+
+# openshell_is <tag>: succeed only when the installed CLI is exactly release <tag>.
+openshell_is() {
+  [ "$(openshell --version 2>/dev/null)" = "openshell ${1#v}" ]
+}
