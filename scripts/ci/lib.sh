@@ -91,3 +91,11 @@ sandbox_ready() {
     *) return 1 ;;
   esac
 }
+
+# sandbox_name <bundle> <mode>: a sandbox name OpenShell accepts (a DNS-1123 label
+# of at most 19 characters) that stays unique for each bundle and auth mode.
+sandbox_name() {
+  local hash
+  hash="$(printf '%s/%s' "$1" "$2" | sha256sum | cut -c1-6)"
+  printf '%s-%s\n' "${1:0:12}" "$hash"
+}

@@ -63,3 +63,19 @@ def test_record_check_flattens_tabs_and_newlines(tmp_path):
     result = run_lib(tmp_path, "exit 0", snippet)
     assert result.returncode == 0
     assert checks.read_text(encoding="utf-8") == "demo\tfail\ta b c\n"
+
+
+def test_sandbox_name_fits_openshell_limit(tmp_path):
+    # OpenShell v0.1.2 rejects sandbox names longer than 19 characters (DNS-1123 label).
+    names = {}
+    for bundle, mode in [("opencode", "api-key"), ("opencode", "subscription"),
+                         ("claude-code", "subscription"), ("a" * 40, "api-key")]:
+        result = run_lib(tmp_path / f"{len(names)}", "", f"sandbox_name {bundle} {mode}")
+        assert result.returncode == 0, result.stderr
+        name = result.stdout.strip()
+        assert 0 < len(name) <= 19
+        assert name[0].isalnum() and name[-1].isalnum()
+        assert all(c.islower() or c.isdigit() or c == "-" for c in name)
+        names[(bundle, mode)] = name
+    assert len(set(names.values())) == len(names)
+    assert names[("opencode", "api-key")].startswith("opencode-")

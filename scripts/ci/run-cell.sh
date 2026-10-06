@@ -85,7 +85,8 @@ prover_check() {
 
 run_mode() {
   local mode="$1" provider_file="$2"
-  local sandbox="paddock-${bundle}-${mode}" provider="paddock-${bundle}-${mode}"
+  local sandbox provider="paddock-${bundle}-${mode}"
+  sandbox="$(sandbox_name "$bundle" "$mode")"
   eval "$(paddock_py provider-info "$provider_file")"
   cleanup_mode "$sandbox" "$provider" "$PROFILE_ID"
 
