@@ -1,0 +1,7 @@
+PadDock
+Copyright 2026 The PadDock Authors
+
+This product includes files derived from NVIDIA OpenShell example provider
+profiles (https://github.com/NVIDIA/OpenShell/tree/main/providers),
+Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES, licensed under the
+Apache License, Version 2.0. Derived files keep NVIDIA's SPDX copyright line.
