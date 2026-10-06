@@ -3,9 +3,9 @@
 import argparse
 import sys
 
-from paddock import bundle, matrix
+from paddock import bundle, logs, matrix
 
-MODULES = (bundle, matrix)
+MODULES = (bundle, matrix, logs)
 
 
 def main(argv=None):
