@@ -71,3 +71,9 @@ jobs:
         run: |
           systemctl --user status openshell-gateway --no-pager || true
           journalctl --user -u openshell-gateway --no-pager -n 300 || true
+          docker ps -a --no-trunc || true
+          for c in $(docker ps -aq); do
+            echo "=== docker logs $c"
+            docker inspect --format '{{.Name}} {{.Config.Image}} exit={{.State.ExitCode}} err={{.State.Error}}' "$c" || true
+            docker logs "$c" 2>&1 | tail -80 || true
+          done
