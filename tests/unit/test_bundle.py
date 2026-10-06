@@ -148,3 +148,13 @@ def test_validate_command_passes_valid_bundles(make_bundle, tmp_path, capsys):
 def test_validate_command_without_bundles(tmp_path, capsys):
     assert main(["validate", "--root", str(tmp_path)]) == 0
     assert "no bundles found" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("policy", [
+    "version: 1\nlandlock:\n  compatibility: best_effort\n",
+    "version: 1\n",
+])
+def test_landlock_must_be_a_hard_requirement(make_bundle, policy):
+    # best_effort lets a sandbox start with filesystem rules silently skipped.
+    with pytest.raises(BundleError, match="policy.yaml: landlock.compatibility must be hard_requirement"):
+        load_bundle(make_bundle(files={"policy.yaml": policy}))

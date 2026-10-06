@@ -62,6 +62,13 @@ def _check_files(bundle_dir, meta):
     for entry in meta["auth"]:
         if not (bundle_dir / entry["provider_file"]).is_file():
             problems.append(f"missing provider file {entry['provider_file']}")
+    for rel in ("policy.yaml", "boundary.yaml"):
+        path = bundle_dir / rel
+        if path.is_file():
+            policy = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if (policy.get("landlock") or {}).get("compatibility") != "hard_requirement":
+                # best_effort lets a sandbox start with filesystem rules silently skipped.
+                problems.append(f"{rel}: landlock.compatibility must be hard_requirement")
     for path in sorted(bundle_dir.rglob("*")):
         if path.is_file() and (path.suffix in LF_ONLY_SUFFIXES or path.name == "Dockerfile"):
             if b"\r\n" in path.read_bytes():

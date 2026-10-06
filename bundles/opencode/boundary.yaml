@@ -17,7 +17,7 @@ filesystem_policy:
     - /tmp
     - /dev/null
 landlock:
-  compatibility: best_effort
+  compatibility: hard_requirement
 process:
   run_as_user: "1000"
   run_as_group: "1000"
