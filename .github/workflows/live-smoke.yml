@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# bash -eo pipefail, so a failed command in a pipeline fails its step.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: live-smoke
   cancel-in-progress: false

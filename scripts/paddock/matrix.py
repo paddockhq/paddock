@@ -26,9 +26,9 @@ def load_versions(path):
 
 
 def affected_bundles(names, changed_files):
-    """Bundles to test. changed_files=None means test every bundle."""
+    """Bundles to test. None or an empty list (a failed diff) means every bundle."""
     names = sorted(names)
-    if changed_files is None:
+    if not changed_files:
         return names
     hit = set()
     for path in changed_files:
