@@ -3,7 +3,9 @@
 import argparse
 import sys
 
-MODULES = ()
+from paddock import bundle
+
+MODULES = (bundle,)
 
 
 def main(argv=None):
