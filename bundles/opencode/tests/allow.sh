@@ -41,15 +41,22 @@ esac
 rc=0
 out="$(sb_exec "$sb" 180 "${PADDOCK_ENV_ARGS[@]}" -- opencode run --standalone -m "$model" "Reply with exactly: OK" 2>&1)" || rc=$?
 printf '%s\n' "$out" >"$PADDOCK_LOG_DIR/opencode-run-$mode.log"
-sleep 3
+# OpenShell pushes log lines in batches: wait for the request's own line, then
+# judge everything logged so far.
 events="$PADDOCK_LOG_DIR/policy-events-$mode.log"
-openshell logs "$sb" --source sandbox </dev/null >"$events" 2>&1 || true
+allowed="$(await_event "$sb" "$events" --action ALLOWED --kind HTTP --host openrouter.ai)" || true
+# Read once more after a further batch interval, so a connection opencode made
+# just before it exited is judged too.
+sleep 2
+fetch_events "$sb" "$events"
 denied="$(paddock_py events --log "$events" --action DENIED --format hosts)"
-allowed="$(paddock_py events --log "$events" --action ALLOWED --host openrouter.ai --format count)"
+others="$(paddock_py events --log "$events" --action ALLOWED --format hosts | grep -vx 'openrouter.ai:443' || true)"
 if [ -n "$denied" ]; then
   record_check "egress:$mode" fail "denied destinations: $(tr '\n' ' ' <<<"$denied")"
+elif [ -n "$others" ]; then
+  record_check "egress:$mode" fail "allowed destinations other than openrouter.ai: $(tr '\n' ' ' <<<"$others")"
 elif [ "${allowed:-0}" -lt 1 ]; then
-  record_check "egress:$mode" fail "no allowed connection to openrouter.ai was logged"
+  record_check "egress:$mode" fail "no allowed request to openrouter.ai was logged"
 else
   record_check "egress:$mode" pass "openrouter.ai only"
 fi
