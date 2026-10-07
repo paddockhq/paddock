@@ -1,0 +1,17 @@
+# NVIDIA example provider profiles the findings job tests (spec 7.5), one per line:
+# <profile id><TAB><provider create arguments>. Profiles come unmodified from
+# https://github.com/NVIDIA/OpenShell/tree/<release>/providers. Credentials are
+# dummy values; aws-s3 mints its own, so it takes --runtime-credentials.
+# github is the control: its read-only rules must block POST /gists.
+github	--credential GITHUB_TOKEN=paddock-findings-dummy
+claude-code	--credential ANTHROPIC_API_KEY=paddock-findings-dummy
+codex	--credential CODEX_AUTH_ACCESS_TOKEN=paddock-findings-dummy --credential CODEX_AUTH_REFRESH_TOKEN=paddock-findings-dummy --credential CODEX_AUTH_ACCOUNT_ID=paddock-findings-dummy
+copilot	--credential COPILOT_GITHUB_TOKEN=paddock-findings-dummy
+openrouter	--credential OPENROUTER_API_KEY=paddock-findings-dummy
+anthropic	--credential ANTHROPIC_API_KEY=paddock-findings-dummy
+openai	--credential OPENAI_API_KEY=paddock-findings-dummy
+nvidia	--credential NVIDIA_API_KEY=paddock-findings-dummy
+deepinfra	--credential DEEPINFRA_API_KEY=paddock-findings-dummy
+pypi
+cursor
+aws-s3	--runtime-credentials

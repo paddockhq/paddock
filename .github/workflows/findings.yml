@@ -1,0 +1,64 @@
+name: findings
+# Spec 7.5: run the must-block suite against NVIDIA's unmodified example provider
+# profiles. Results stay private until disclosed (spec 9.2). Job logs, summaries
+# and artifacts of a public repo are visible to any signed-in user, so every
+# result is encrypted to the maintainer's age key before upload, and no step
+# prints an outcome. Decrypt with:
+#   gh run download <run-id> --repo paddockhq/paddock -n findings
+#   age -d -i <your key file> findings.tgz.age | tar xz
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: findings
+  cancel-in-progress: false
+
+jobs:
+  findings:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Check the maintainer's age recipient
+        run: |
+          if ! grep -qE '^age1[a-z0-9]{58}$' .github/findings-recipients.txt; then
+            echo "::error::.github/findings-recipients.txt has no age public key (age1...)."
+            exit 1
+          fi
+      - name: Install age
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age >/dev/null
+      - name: Run the findings suite (all output goes to files)
+        run: |
+          mkdir -p "$RUNNER_TEMP/findings"
+          if bash scripts/ci/findings.sh "$RUNNER_TEMP/findings" >"$RUNNER_TEMP/findings/console.log" 2>&1; then
+            echo "findings run finished"
+          else
+            echo "findings setup failed; details are in the encrypted bundle"
+          fi
+      - name: Encrypt the results and delete the plain copy
+        run: |
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/findings.tgz" findings
+          age -R .github/findings-recipients.txt -o "$RUNNER_TEMP/findings.tgz.age" "$RUNNER_TEMP/findings.tgz"
+          rm -rf "$RUNNER_TEMP/findings" "$RUNNER_TEMP/findings.tgz"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: findings
+          path: ${{ runner.temp }}/findings.tgz.age
+          if-no-files-found: error
+          retention-days: 3
