@@ -42,3 +42,7 @@ openshell sandbox create --name opencode \
 
 See the latest CI run's compatibility report for the OpenShell releases and
 architectures this bundle passes on.
+
+OpenShell v0.0.x is not supported: its sandbox supervisor creates the network
+namespace with `ip netns` from inside the image, and the official OpenCode image
+is Alpine without iproute2 ([ADR 0001](../../docs/decisions/0001-ci-runners.md)).

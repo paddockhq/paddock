@@ -89,3 +89,18 @@ def test_empty_changed_list_means_every_bundle():
     # A pull request always changes at least one file. An empty list means the
     # diff failed, so test everything rather than skip every cell.
     assert affected_bundles(["b", "a"], []) == ["a", "b"]
+
+
+def test_repository_lists_v0_0_116_but_opencode_runs_only_where_supported():
+    # ADR 0001: v0.0.116 cannot start Alpine-based images, so the report shows
+    # "unsupported (needs v0.1.0)" for it instead of hiding the version.
+    from pathlib import Path
+
+    from paddock.bundle import load_bundle
+    from paddock.matrix import load_versions
+
+    root = Path(__file__).resolve().parents[2]
+    versions = load_versions(root / "scripts" / "ci" / "openshell-versions.json")
+    assert versions == ["v0.1.2", "v0.0.116"]
+    cells = build_matrix([load_bundle(root / "bundles" / "opencode")], versions)
+    assert {cell["openshell_version"] for cell in cells} == {"v0.1.2"}

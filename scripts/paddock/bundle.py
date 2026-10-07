@@ -43,6 +43,7 @@ def load_bundle(bundle_dir):
     ]
     if not problems:
         problems = _check_files(bundle_dir, meta)
+    problems += _crlf_problems(bundle_dir)
     if problems:
         raise BundleError(f"{bundle_dir}:\n  " + "\n  ".join(problems))
     return {**meta, "dir": bundle_dir}
@@ -79,6 +80,11 @@ def _check_files(bundle_dir, meta):
             if (policy.get("landlock") or {}).get("compatibility") != "hard_requirement":
                 # best_effort lets a sandbox start with filesystem rules silently skipped.
                 problems.append(f"{rel}: landlock.compatibility must be hard_requirement")
+    return problems
+
+
+def _crlf_problems(bundle_dir):
+    problems = []
     for path in sorted(bundle_dir.rglob("*")):
         if path.is_file() and (path.suffix in LF_ONLY_SUFFIXES or path.name == "Dockerfile"):
             if b"\r\n" in path.read_bytes():

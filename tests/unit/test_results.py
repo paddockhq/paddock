@@ -78,3 +78,28 @@ def test_report_command_reads_result_files(make_bundle, tmp_path, capsys):
     rc = main(["report", "--root", str(tmp_path), "--versions-file", str(versions), "--results", str(results_dir)])
     assert rc == 0
     assert "| demo | pass | not run |" in capsys.readouterr().out
+
+
+def test_must_block_details_are_withheld_when_a_deny_check_does_not_pass():
+    # Spec 7.6 and 9.2: a must-block check that does not pass may describe an
+    # unfixed OpenShell weakness, and CI results on this public repo are public.
+    checks = [
+        {"name": "version:api-key", "status": "pass", "detail": "opencode v2.0.21"},
+        {"name": "deny-m1-ipv6:api-key", "status": "fail", "detail": "the probe reached 2606:4700:4700::1111:443"},
+        {"name": "deny-m1-tcp-ip:api-key", "status": "pass", "detail": ""},
+        {"name": "deny-m2-control:api-key", "status": "error", "detail": "only 0 of 1 allowed requests"},
+    ]
+    result = cell_result("demo", "v0.1.2", "ubuntu-24.04", checks)
+    assert result["status"] == "fail"
+    assert [check["name"] for check in result["checks"]] == ["version:api-key", "deny"]
+    assert result["checks"][1]["status"] == "fail"
+    assert "2606" not in json.dumps(result)
+    assert "ipv6" not in json.dumps(result)
+
+
+def test_passing_must_block_checks_stay_public():
+    checks = [
+        {"name": "deny-m1-ipv6:api-key", "status": "pass", "detail": ""},
+        {"name": "deny-m2-literal-credential:api-key", "status": "skip", "detail": "forwarded unchanged"},
+    ]
+    assert cell_result("demo", "v0.1.2", "ubuntu-24.04", checks)["checks"] == checks
