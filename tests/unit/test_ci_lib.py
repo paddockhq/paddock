@@ -87,3 +87,79 @@ def test_openshell_is_matches_only_the_exact_release(tmp_path):
     assert run_lib(tmp_path / "b", fake, "openshell_is v0.1.20").returncode != 0
     assert run_lib(tmp_path / "c", 'echo "openshell 0.1.20"', "openshell_is v0.1.2").returncode != 0
     assert run_lib(tmp_path / "d", "exit 1", "openshell_is v0.1.2").returncode != 0
+
+
+ROOT = LIB.parents[2]
+
+
+def test_gateway_connected_does_not_fall_back_when_json_status_fails(tmp_path):
+    # A newer CLI that errors on a disconnected gateway must not read as connected
+    # just because its plain-text output still has a Version: line.
+    fake = 'if [ "${2:-}" = "-o" ]; then echo "error: connection refused" >&2; exit 1; fi\necho "Version: 0.1.2"'
+    assert run_lib(tmp_path, fake, "gateway_connected").returncode != 0
+
+
+def test_sandbox_ready_accepts_only_the_ready_phase(tmp_path):
+    assert run_lib(tmp_path / "a", """echo '{"phase":"SANDBOX_PHASE_READY"}'""", "sandbox_ready demo").returncode == 0
+    assert run_lib(tmp_path / "b", """echo '{"phase":"NOT_READY"}'""", "sandbox_ready demo").returncode != 0
+
+
+def test_record_check_is_silent_in_quiet_mode(tmp_path):
+    checks = tmp_path / "checks.tsv"
+    loud = run_lib(tmp_path / "a", "exit 0", f'PADDOCK_CHECKS_FILE="{checks}" record_check demo pass "x"')
+    quiet = run_lib(tmp_path / "b", "exit 0", f'PADDOCK_QUIET=1 PADDOCK_CHECKS_FILE="{checks}" record_check demo fail "x"')
+    assert "check demo: pass" in loud.stderr
+    assert quiet.stderr == ""
+    assert checks.read_text(encoding="utf-8") == "demo\tpass\tx\ndemo\tfail\tx\n"
+
+
+LOG_LINE = ("[1.0] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED /sandbox/.paddock/curl(0) -> "
+            "pd-1.example.com:443 [reason:transparent_tcp_policy_denied]")
+
+
+def test_await_event_counts_matching_lines(tmp_path):
+    events = tmp_path / "events.log"
+    fake = f'[ "$1" = logs ] && echo "{LOG_LINE}"'
+    snippet = (f'PADDOCK_ROOT="{ROOT}" PADDOCK_EVENT_WAIT=1 await_event demo "{events}" '
+               '--action DENIED --host pd-1.example.com --port 443')
+    result = run_lib(tmp_path, fake, snippet)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"
+    assert "pd-1.example.com" in events.read_text(encoding="utf-8")
+
+
+def test_await_event_fails_when_nothing_matches(tmp_path):
+    fake = f'[ "$1" = logs ] && echo "{LOG_LINE}"'
+    snippet = (f'PADDOCK_ROOT="{ROOT}" PADDOCK_EVENT_WAIT=1 await_event demo "{tmp_path}/e.log" '
+               '--action DENIED --host other.example.com')
+    result = run_lib(tmp_path, fake, snippet)
+    assert result.returncode != 0
+    assert result.stdout.strip() == "0"
+
+
+def test_seal_logs_encrypts_to_the_maintainer_and_deletes_the_plaintext(tmp_path):
+    root = tmp_path / "root"
+    (root / ".github").mkdir(parents=True)
+    (root / ".github" / "findings-recipients.txt").write_text("age1" + "q" * 58 + "\n", encoding="utf-8")
+    logs = tmp_path / "results" / "logs" / "cell"
+    logs.mkdir(parents=True)
+    (logs / "checks.tsv").write_text("deny-m1-ipv6:api-key\tfail\tsecret\n", encoding="utf-8")
+    out = tmp_path / "results" / "cell.private.tgz.age"
+    # A stand-in for age that copies the tar stream; the real tool encrypts it.
+    snippet = (f'age() {{ [ "$1" = -R ] && [ "$3" = -o ] && cat >"$4"; }}; '
+               f'PADDOCK_ROOT="{root}" seal_logs "{logs}" "{out}"')
+    result = run_lib(tmp_path / "x", "exit 0", snippet)
+    assert result.returncode == 0, result.stderr
+    assert not logs.exists()
+    assert out.stat().st_size > 0
+
+
+def test_seal_logs_without_a_key_still_deletes_the_plaintext(tmp_path):
+    logs = tmp_path / "results" / "logs" / "cell"
+    logs.mkdir(parents=True)
+    (logs / "checks.tsv").write_text("deny-m1-ipv6:api-key\tfail\tsecret\n", encoding="utf-8")
+    out = tmp_path / "results" / "cell.private.tgz.age"
+    result = run_lib(tmp_path / "x", "exit 0", f'PADDOCK_ROOT="{tmp_path}" seal_logs "{logs}" "{out}"')
+    assert result.returncode == 0, result.stderr
+    assert not logs.exists()
+    assert not out.exists()
