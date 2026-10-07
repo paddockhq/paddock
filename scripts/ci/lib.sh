@@ -8,6 +8,13 @@ die() {
   exit 1
 }
 
+# oc <openshell args...>: run the openshell CLI with a time limit
+# (PADDOCK_CLI_TIMEOUT seconds, default 300), so one hung call cannot use up a
+# job's timeout. `sandbox exec` goes through sb_exec, which has its own limit.
+oc() {
+  timeout --kill-after=10 "${PADDOCK_CLI_TIMEOUT:-300}" openshell "$@"
+}
+
 # wait_until <timeout-seconds> <description> <command...>
 # Re-runs the command every 2 seconds until it succeeds or the timeout passes.
 wait_until() {
@@ -58,6 +65,7 @@ record_check() {
   [ -n "${PADDOCK_CHECKS_FILE:-}" ] || die "PADDOCK_CHECKS_FILE is not set"
   detail="${detail//$'\t'/ }"
   detail="${detail//$'\n'/ }"
+  detail="${detail//$'\r'/ }"
   printf '%s\t%s\t%s\n' "$name" "$status" "${detail:0:500}" >>"$PADDOCK_CHECKS_FILE"
   # PADDOCK_QUIET=1 (findings job): job logs are public, so outcomes stay in the file.
   if [ "${PADDOCK_QUIET:-0}" != 1 ]; then
@@ -69,7 +77,7 @@ record_check() {
 # line. v0.0.116 has no --no-login-shell.
 exec_flags() {
   local help flag
-  help="$(openshell sandbox exec --help </dev/null 2>&1 || true)"
+  help="$(oc sandbox exec --help </dev/null 2>&1 || true)"
   for flag in --no-tty --no-login-shell; do
     if grep -q -- "$flag" <<<"$help"; then
       printf '%s\n' "$flag"
@@ -98,7 +106,7 @@ sb_exec() {
 # sandbox_ready <name>: succeed when the sandbox phase is Ready.
 sandbox_ready() {
   local phase
-  phase="$(openshell sandbox get "$1" -o json </dev/null 2>/dev/null | jq -r '.phase // empty' 2>/dev/null)"
+  phase="$(oc sandbox get "$1" -o json </dev/null 2>/dev/null | jq -r '.phase // empty' 2>/dev/null)"
   case "$phase" in
     Ready | SANDBOX_PHASE_READY) return 0 ;;
     *) return 1 ;;
@@ -115,7 +123,7 @@ sandbox_name() {
 
 # openshell_is <tag>: succeed only when the installed CLI is exactly release <tag>.
 openshell_is() {
-  [ "$(openshell --version 2>/dev/null)" = "openshell ${1#v}" ]
+  [ "$(oc --version 2>/dev/null)" = "openshell ${1#v}" ]
 }
 
 # Where CI uploads the static curl probe inside a sandbox (scripts/paddock/probe.py).
@@ -125,7 +133,7 @@ PADDOCK_PROBE_PATH=/sandbox/.paddock/curl
 # that it runs. Upload it before its first network use: OpenShell pins each
 # binary's hash the first time it connects.
 upload_probe() {
-  openshell sandbox upload "$1" "$2" "${PADDOCK_PROBE_PATH%/*}/" </dev/null >/dev/null 2>&1 &&
+  oc sandbox upload "$1" "$2" "${PADDOCK_PROBE_PATH%/*}/" </dev/null >/dev/null 2>&1 &&
     sb_exec "$1" 30 -- chmod 0755 "$PADDOCK_PROBE_PATH" >/dev/null 2>&1 &&
     sb_exec "$1" 30 -- "$PADDOCK_PROBE_PATH" --version >/dev/null 2>&1
 }
@@ -133,7 +141,7 @@ upload_probe() {
 # fetch_events <sandbox> <file>: save the sandbox's policy log. The default
 # `-n 200` can drop older lines.
 fetch_events() {
-  openshell logs "$1" --source sandbox -n 20000 </dev/null >"$2" 2>&1 || true
+  oc logs "$1" --source sandbox -n 20000 </dev/null >"$2" 2>&1 || true
 }
 
 # await_event <sandbox> <file> <paddock events filters...>
@@ -167,4 +175,20 @@ seal_logs() {
     tar -C "${dir%/*}" -czf - "${dir##*/}" | age -R "$recipients" -o "$out" || rm -f "$out"
   fi
   rm -rf "$dir"
+}
+
+# publish_logs <log-dir> <results-dir> <cell>: decide what CI may publish. Raw logs
+# stay outside <results-dir> (which CI uploads publicly, even after a cancel) until
+# this runs. They move to <results-dir>/logs/<cell>, or, when a must-block check
+# did not pass, they are sealed into <results-dir>/<cell>.private.tgz.age instead
+# (spec 7.6).
+publish_logs() {
+  local dir="$1" results="$2" cell="$3"
+  if grep -qE $'^deny-[^\t]*\t(fail|error)\t' "$dir/checks.tsv" 2>/dev/null; then
+    seal_logs "$dir" "$results/$cell.private.tgz.age"
+  else
+    mkdir -p "$results/logs"
+    rm -rf "${results:?}/logs/$cell"
+    mv "$dir" "$results/logs/$cell"
+  fi
 }
