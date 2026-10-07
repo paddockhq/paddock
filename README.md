@@ -1,4 +1,7 @@
 # PadDock
+<p align="center">
+  <img src="logo/img.png" alt="PadDock logo" width="200">
+</p>
 
 Tested, least-privilege bundles for running AI coding agents inside
 [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandboxes.
