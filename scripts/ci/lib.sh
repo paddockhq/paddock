@@ -28,12 +28,22 @@ wait_until() {
 # gateway. `openshell status` exits 0 even when disconnected, so read its output.
 # v0.1.x supports `-o json`; older releases print a "Version:" line when connected.
 gateway_connected() {
-  local out
-  if out="$(openshell status -o json </dev/null 2>/dev/null)" && [ -n "$out" ]; then
+  local out err rc=0
+  err="$(mktemp)"
+  out="$(timeout 15 openshell status -o json </dev/null 2>"$err")" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$err"
     jq -e '.status == "connected"' >/dev/null 2>&1 <<<"$out"
     return
   fi
-  openshell status </dev/null 2>/dev/null | grep -q 'Version:'
+  # Fall back to the text output only when this CLI has no `-o json` (a usage error).
+  if [ "$rc" -eq 2 ] || grep -qiE 'unexpected argument|unrecognized|unknown (option|argument)' "$err"; then
+    rm -f "$err"
+    timeout 15 openshell status </dev/null 2>/dev/null | grep -q 'Version:'
+    return
+  fi
+  rm -f "$err"
+  return 1
 }
 
 # paddock_py <args...>: run the PadDock Python helpers from this checkout.
@@ -49,7 +59,10 @@ record_check() {
   detail="${detail//$'\t'/ }"
   detail="${detail//$'\n'/ }"
   printf '%s\t%s\t%s\n' "$name" "$status" "${detail:0:500}" >>"$PADDOCK_CHECKS_FILE"
-  log "check ${name}: ${status}${detail:+ - ${detail:0:200}}"
+  # PADDOCK_QUIET=1 (findings job): job logs are public, so outcomes stay in the file.
+  if [ "${PADDOCK_QUIET:-0}" != 1 ]; then
+    log "check ${name}: ${status}${detail:+ - ${detail:0:200}}"
+  fi
 }
 
 # exec_flags: print the `openshell sandbox exec` flags this CLI supports, one per
@@ -87,7 +100,7 @@ sandbox_ready() {
   local phase
   phase="$(openshell sandbox get "$1" -o json </dev/null 2>/dev/null | jq -r '.phase // empty' 2>/dev/null)"
   case "$phase" in
-    Ready | *_READY) return 0 ;;
+    Ready | SANDBOX_PHASE_READY) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -103,4 +116,55 @@ sandbox_name() {
 # openshell_is <tag>: succeed only when the installed CLI is exactly release <tag>.
 openshell_is() {
   [ "$(openshell --version 2>/dev/null)" = "openshell ${1#v}" ]
+}
+
+# Where CI uploads the static curl probe inside a sandbox (scripts/paddock/probe.py).
+PADDOCK_PROBE_PATH=/sandbox/.paddock/curl
+
+# upload_probe <sandbox> <local-probe>: copy the probe into the sandbox and check
+# that it runs. Upload it before its first network use: OpenShell pins each
+# binary's hash the first time it connects.
+upload_probe() {
+  openshell sandbox upload "$1" "$2" "${PADDOCK_PROBE_PATH%/*}/" </dev/null >/dev/null 2>&1 &&
+    sb_exec "$1" 30 -- chmod 0755 "$PADDOCK_PROBE_PATH" >/dev/null 2>&1 &&
+    sb_exec "$1" 30 -- "$PADDOCK_PROBE_PATH" --version >/dev/null 2>&1
+}
+
+# fetch_events <sandbox> <file>: save the sandbox's policy log. The default
+# `-n 200` can drop older lines.
+fetch_events() {
+  openshell logs "$1" --source sandbox -n 20000 </dev/null >"$2" 2>&1 || true
+}
+
+# await_event <sandbox> <file> <paddock events filters...>
+# OpenShell pushes log lines in batches, so poll until a matching event arrives
+# (PADDOCK_EVENT_WAIT seconds, default 10). Prints the final count and succeeds
+# when it is at least 1.
+await_event() {
+  local sandbox="$1" file="$2"
+  shift 2
+  local tries="${PADDOCK_EVENT_WAIT:-10}" count=0
+  while :; do
+    fetch_events "$sandbox" "$file"
+    count="$(paddock_py events --log "$file" "$@" --format count 2>/dev/null)" || count=0
+    if [ "$count" -ge 1 ]; then break; fi
+    tries=$((tries - 1))
+    if [ "$tries" -le 0 ]; then break; fi
+    sleep 1
+  done
+  echo "$count"
+  [ "$count" -ge 1 ]
+}
+
+# seal_logs <dir> <out.age>: encrypt a folder to the maintainer's age key
+# (.github/findings-recipients.txt) and delete the plaintext. Without the key or
+# the age tool, the plaintext is still deleted: withheld beats published
+# (spec 7.6).
+seal_logs() {
+  local dir="$1" out="$2" recipients="$PADDOCK_ROOT/.github/findings-recipients.txt"
+  if [ -s "$recipients" ] &&
+    { command -v age >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq age; } >/dev/null 2>&1; }; then
+    tar -C "${dir%/*}" -czf - "${dir##*/}" | age -R "$recipients" -o "$out" || rm -f "$out"
+  fi
+  rm -rf "$dir"
 }
