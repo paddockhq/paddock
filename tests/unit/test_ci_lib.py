@@ -163,3 +163,44 @@ def test_seal_logs_without_a_key_still_deletes_the_plaintext(tmp_path):
     assert result.returncode == 0, result.stderr
     assert not logs.exists()
     assert not out.exists()
+
+
+def test_fetch_events_gives_up_on_a_hung_cli(tmp_path):
+    # Every openshell call is bounded, so one hung call cannot eat the job timeout.
+    import time
+
+    start = time.monotonic()
+    result = run_lib(tmp_path, 'if [ "$1" = logs ]; then sleep 30; fi',
+                     f'PADDOCK_CLI_TIMEOUT=2 fetch_events sb "{tmp_path}/events.log"')
+    assert result.returncode == 0, result.stderr
+    assert time.monotonic() - start < 15
+
+
+def test_publish_logs_moves_passing_logs_into_the_results(tmp_path):
+    logs = tmp_path / "work" / "cell"
+    logs.mkdir(parents=True)
+    (logs / "checks.tsv").write_text("deny-m1-ipv6:api-key\tpass\t\nversion:api-key\tpass\tx\n", encoding="utf-8")
+    results = tmp_path / "results"
+    results.mkdir()
+    result = run_lib(tmp_path / "x", "exit 0", f'PADDOCK_ROOT="{tmp_path}" publish_logs "{logs}" "{results}" cell')
+    assert result.returncode == 0, result.stderr
+    assert (results / "logs" / "cell" / "checks.tsv").is_file()
+    assert not logs.exists()
+
+
+def test_publish_logs_seals_them_when_a_must_block_check_did_not_pass(tmp_path):
+    root = tmp_path / "root"
+    (root / ".github").mkdir(parents=True)
+    (root / ".github" / "findings-recipients.txt").write_text("age1" + "q" * 58 + "\n", encoding="utf-8")
+    logs = tmp_path / "work" / "cell"
+    logs.mkdir(parents=True)
+    (logs / "checks.tsv").write_text("deny-m1-ipv6:api-key\tfail\tthe probe reached it\n", encoding="utf-8")
+    results = tmp_path / "results"
+    results.mkdir()
+    snippet = (f'age() {{ [ "$1" = -R ] && [ "$3" = -o ] && cat >"$4"; }}; '
+               f'PADDOCK_ROOT="{root}" publish_logs "{logs}" "{results}" cell')
+    result = run_lib(tmp_path / "x", "exit 0", snippet)
+    assert result.returncode == 0, result.stderr
+    assert (results / "cell.private.tgz.age").stat().st_size > 0
+    assert not (results / "logs").exists()
+    assert not logs.exists()
