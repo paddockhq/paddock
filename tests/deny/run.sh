@@ -21,9 +21,10 @@
 #   - Logged denials pass only when the attempt fails AND OpenShell logs the matching
 #     DENIED line. Failing without the line is "error" (the network, not OpenShell,
 #     may have stopped it); an ALLOWED line or a successful attempt is "fail".
-#   - UDP and the outside-resolver query produce no log line in OpenShell v0.1.2. They
-#     pass on the broker's errno text ("Destination address required" or "Permission
-#     denied"); any other failure, such as "Network is unreachable", is "error".
+#   - UDP and the outside-resolver query produce no log line in OpenShell v0.1.2. The
+#     probe sends them with curl tftp://, and they pass only on the broker's answer:
+#     curl exit 55 "Destination address required". Any other failure, such as
+#     "Network is unreachable" or a probe that cannot run, is "error".
 #   - The file-write check passes on "Permission denied" for a folder that Unix
 #     permissions allow (/var/tmp), so only Landlock can be the reason.
 set -uo pipefail
@@ -34,7 +35,7 @@ sb="$PADDOCK_SANDBOX"
 mode="$PADDOCK_AUTH_MODE"
 run="$PADDOCK_RUN_MODE"
 probe="${PADDOCK_PROBE:-$PADDOCK_PROBE_PATH}"
-nonce="$(date +%s)$$"
+nonce="${PADDOCK_NONCE:-$(date +%s)$$}" # tests/unit/test_deny.py pins it
 events="$PADDOCK_LOG_DIR/deny-$run-$mode-events.log"
 out="$PADDOCK_LOG_DIR/deny-$run-$mode"
 mkdir -p "$out"
@@ -75,14 +76,15 @@ logged_block() {
   fi
 }
 
-# errno_block <item> <command...>: for attempts OpenShell blocks without a log line.
+# errno_block <item> <curl tftp:// command...>: for UDP sends, which OpenShell blocks
+# without a log line. Only the broker's refusal (ADR 0002) counts as blocked.
 errno_block() {
   local item="$1"
   shift
   attempt "$item" "$@"
   if [ "$rc" -eq 0 ]; then
     check "$item" fail "the attempt succeeded"
-  elif grep -qiE 'Destination address required|Permission denied' "$out/$item.txt"; then
+  elif [ "$rc" -eq 55 ] && grep -q 'curl: (55) Destination address required' "$out/$item.txt"; then
     check "$item" pass ""
   else
     check "$item" error "failed (exit $rc) without the sandbox broker's error; see $item.txt"
@@ -163,7 +165,11 @@ url_path() { # https://host[:port]/path -> /path
 W=(-w '\nhttp=%{http_code}\n')
 http_code() { sed -n 's/^http=//p' "$1" | tail -n 1; }
 
-mapfile -t plan < <(paddock_py probe-plan "$PADDOCK_PROVIDER_FILE" --nonce "$nonce")
+if ! paddock_py probe-plan "$PADDOCK_PROVIDER_FILE" --nonce "$nonce" >"$out/plan.tsv" 2>"$out/plan.err"; then
+  check plan error "could not plan the L7 requests from the provider profile; see plan.err"
+  exit 0
+fi
+mapfile -t plan <"$out/plan.tsv"
 controls=0
 allowed_controls=0
 control_url=""

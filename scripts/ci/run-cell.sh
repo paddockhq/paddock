@@ -21,10 +21,13 @@ if [ "${4:-}" = "--live" ]; then live=1; fi
 bundle_dir="$PADDOCK_ROOT/bundles/$bundle"
 cell="${bundle}--${version}--${runner}"
 results_dir="$PADDOCK_ROOT/results"
-PADDOCK_LOG_DIR="$results_dir/logs/$cell"
+# Raw logs stay outside results/, which CI uploads publicly even after a cancel or
+# a timeout, until finish() decides what may be published (spec 7.6).
+PADDOCK_LOG_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/paddock-logs/$cell"
 PADDOCK_CHECKS_FILE="$PADDOCK_LOG_DIR/checks.tsv"
 export PADDOCK_LOG_DIR PADDOCK_CHECKS_FILE
-mkdir -p "$PADDOCK_LOG_DIR"
+rm -rf "$PADDOCK_LOG_DIR"
+mkdir -p "$PADDOCK_LOG_DIR" "$results_dir"
 : >"$PADDOCK_CHECKS_FILE"
 primary="$(jq -r '.versions[0]' "$PADDOCK_ROOT/scripts/ci/openshell-versions.json")"
 prover="$HOME/.local/bin/openshell-prover"
@@ -36,11 +39,9 @@ finish() {
   paddock_py result --bundle "$bundle" --openshell-version "$version" --runner "$runner" \
     --checks "$PADDOCK_CHECKS_FILE" --out "$results_dir/$cell.json" || rc=$?
   # Spec 7.6: a must-block check that did not pass may describe an unfixed
-  # OpenShell weakness. The public result withholds its details (results.py);
-  # the raw logs are encrypted for the maintainer, and the plaintext is deleted.
-  if grep -qE $'^deny-[^\t]*\t(fail|error)\t' "$PADDOCK_CHECKS_FILE"; then
-    seal_logs "$PADDOCK_LOG_DIR" "$results_dir/$cell.private.tgz.age"
-  fi
+  # OpenShell weakness. The public result withholds its details (results.py), and
+  # publish_logs seals the raw logs for the maintainer instead of publishing them.
+  publish_logs "$PADDOCK_LOG_DIR" "$results_dir" "$cell"
   exit "$rc"
 }
 trap finish EXIT
@@ -49,9 +50,9 @@ trap finish EXIT
 # profile that a provider uses. Each delete exits 0 when the object is missing.
 cleanup_mode() {
   local sandbox="$1" provider="$2" profile="$3"
-  openshell sandbox delete "$sandbox" </dev/null >/dev/null 2>&1 || true
-  openshell provider delete "$provider" </dev/null >/dev/null 2>&1 || true
-  openshell provider profile delete "$profile" </dev/null >/dev/null 2>&1 || true
+  oc sandbox delete "$sandbox" </dev/null >/dev/null 2>&1 || true
+  oc provider delete "$provider" </dev/null >/dev/null 2>&1 || true
+  oc provider profile delete "$profile" </dev/null >/dev/null 2>&1 || true
 }
 
 # No --auto-providers/--no-auto-providers flag: with stdin closed, a missing
@@ -59,7 +60,7 @@ cleanup_mode() {
 # <label> names the log file: sandbox-<label>.log.
 create_sandbox() {
   local sandbox="$1" provider="$2" label="$3"
-  openshell sandbox create --name "$sandbox" --from "$PADDOCK_IMAGE" \
+  oc sandbox create --name "$sandbox" --from "$PADDOCK_IMAGE" \
     --policy "$bundle_dir/policy.yaml" --provider "$provider" \
     "${PADDOCK_ENV_ARGS[@]}" --no-tty --detach </dev/null >"$PADDOCK_LOG_DIR/sandbox-$label.log" 2>&1 &&
     wait_until 300 "sandbox $sandbox to be Ready" sandbox_ready "$sandbox"
@@ -77,7 +78,7 @@ prover_check() {
   fi
   local candidate="$PADDOCK_LOG_DIR/effective-policy-$mode.yaml"
   local out="$PADDOCK_LOG_DIR/prover-$mode.json"
-  if ! openshell sandbox get "$sandbox" --policy-only </dev/null >"$candidate" 2>>"$PADDOCK_LOG_DIR/sandbox-$mode.log"; then
+  if ! oc sandbox get "$sandbox" --policy-only </dev/null >"$candidate" 2>>"$PADDOCK_LOG_DIR/sandbox-$mode.log"; then
     record_check "prover:$mode" error "could not read the effective policy"
     return
   fi
@@ -158,8 +159,8 @@ child_mode() {
   fi
   eval "$info"
   cleanup_mode "$sandbox" "$provider" "$VARIANT_PROFILE_ID"
-  if ! openshell provider profile import -f "$variant" </dev/null >"$PADDOCK_LOG_DIR/import-$mode-child.log" 2>&1 ||
-    ! openshell provider create --name "$provider" --type "$VARIANT_PROFILE_ID" "${CRED_ARGS[@]}" \
+  if ! oc provider profile import -f "$variant" </dev/null >"$PADDOCK_LOG_DIR/import-$mode-child.log" 2>&1 ||
+    ! oc provider create --name "$provider" --type "$VARIANT_PROFILE_ID" "${CRED_ARGS[@]}" \
       </dev/null >"$PADDOCK_LOG_DIR/provider-$mode-child.log" 2>&1; then
     record_check "deny-m2-setup:$mode" error "could not create the variant provider; see import-$mode-child.log"
     cleanup_mode "$sandbox" "$provider" "$VARIANT_PROFILE_ID"
@@ -170,7 +171,7 @@ child_mode() {
   else
     record_check "deny-m2-setup:$mode" error "the variant sandbox did not become Ready; see sandbox-$mode-child.log"
   fi
-  openshell logs "$sandbox" --source all -n 20000 </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs-$mode-child.txt" 2>&1 || true
+  oc logs "$sandbox" --source all -n 20000 </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs-$mode-child.txt" 2>&1 || true
   cleanup_mode "$sandbox" "$provider" "$VARIANT_PROFILE_ID"
 }
 
@@ -186,18 +187,18 @@ run_mode() {
   eval "$info"
   cleanup_mode "$sandbox" "$provider" "$PROFILE_ID"
 
-  if openshell provider profile lint -f "$provider_file" </dev/null >"$PADDOCK_LOG_DIR/lint-$mode.log" 2>&1; then
+  if oc provider profile lint -f "$provider_file" </dev/null >"$PADDOCK_LOG_DIR/lint-$mode.log" 2>&1; then
     record_check "profile-lint:$mode" pass ""
   else
     record_check "profile-lint:$mode" fail "$(tail -n 5 "$PADDOCK_LOG_DIR/lint-$mode.log")"
     return
   fi
-  if ! openshell provider profile import -f "$provider_file" </dev/null >"$PADDOCK_LOG_DIR/import-$mode.log" 2>&1; then
+  if ! oc provider profile import -f "$provider_file" </dev/null >"$PADDOCK_LOG_DIR/import-$mode.log" 2>&1; then
     record_check "provider:$mode" error "profile import failed: $(tail -n 3 "$PADDOCK_LOG_DIR/import-$mode.log")"
     return
   fi
   credential_args "$mode" "$dummy_credential" || return
-  if openshell provider create --name "$provider" --type "$PROFILE_ID" "${CRED_ARGS[@]}" \
+  if oc provider create --name "$provider" --type "$PROFILE_ID" "${CRED_ARGS[@]}" \
     </dev/null >"$PADDOCK_LOG_DIR/provider-$mode.log" 2>&1; then
     record_check "provider:$mode" pass ""
   else
@@ -209,7 +210,7 @@ run_mode() {
     record_check "sandbox:$mode" pass ""
   else
     record_check "sandbox:$mode" fail "the sandbox did not become Ready; see sandbox-$mode.log"
-    openshell logs "$sandbox" --source all </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs-$mode.txt" 2>&1 || true
+    oc logs "$sandbox" --source all </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs-$mode.txt" 2>&1 || true
     cleanup_mode "$sandbox" "$provider" "$PROFILE_ID"
     return
   fi
@@ -226,7 +227,7 @@ run_mode() {
     deny_suite m1 "$sandbox" "$mode" "$provider_file" "$dummy_credential"
   fi
 
-  openshell logs "$sandbox" --source all -n 20000 </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs-$mode.txt" 2>&1 || true
+  oc logs "$sandbox" --source all -n 20000 </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs-$mode.txt" 2>&1 || true
   cleanup_mode "$sandbox" "$provider" "$PROFILE_ID"
 
   if [ "$live" != 1 ]; then
@@ -242,7 +243,7 @@ if [ "$preinstalled" = 1 ]; then
   if openshell_is "$version"; then
     record_check setup pass "OpenShell $version (preinstalled)"
   else
-    record_check setup error "preinstalled OpenShell is not $version: $(openshell --version 2>&1)"
+    record_check setup error "preinstalled OpenShell is not $version: $(oc --version 2>&1)"
     exit 1
   fi
 elif bash "$PADDOCK_ROOT/scripts/ci/install-openshell.sh" "$version" >"$PADDOCK_LOG_DIR/install.log" 2>&1; then

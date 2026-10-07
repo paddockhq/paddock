@@ -67,18 +67,20 @@ for entry in "${entries[@]}"; do
   fi
   sandbox="$(sandbox_name "fd-$id" findings)"
   provider="paddock-fd-$id"
-  openshell sandbox delete "$sandbox" </dev/null >/dev/null 2>&1 || true
-  openshell provider delete "$provider" </dev/null >/dev/null 2>&1 || true
-  openshell provider profile delete "$id" </dev/null >/dev/null 2>&1 || true
-  if ! openshell provider profile import -f "$profile_file" </dev/null >"$PADDOCK_LOG_DIR/import.log" 2>&1 ||
-    ! openshell provider create --name "$provider" --type "$id" "${args[@]}" \
+  oc sandbox delete "$sandbox" </dev/null >/dev/null 2>&1 || true
+  oc provider delete "$provider" </dev/null >/dev/null 2>&1 || true
+  oc provider profile delete "$id" </dev/null >/dev/null 2>&1 || true
+  if ! oc provider profile import -f "$profile_file" </dev/null >"$PADDOCK_LOG_DIR/import.log" 2>&1 ||
+    ! oc provider create --name "$provider" --type "$id" "${args[@]}" \
       </dev/null >"$PADDOCK_LOG_DIR/provider.log" 2>&1; then
     record_check "findings-setup:$id" error "could not import the profile or create the provider"
-  elif ! openshell sandbox create --name "$sandbox" --from paddock-findings:local \
+  elif ! oc sandbox create --name "$sandbox" --from paddock-findings:local \
     --policy "$PADDOCK_ROOT/tests/findings/policy.yaml" --provider "$provider" \
     --no-tty --detach </dev/null >"$PADDOCK_LOG_DIR/sandbox.log" 2>&1 ||
     ! wait_until 300 "sandbox $sandbox" sandbox_ready "$sandbox"; then
     record_check "findings-setup:$id" error "the sandbox did not become Ready"
+  elif ! sb_exec "$sandbox" 30 -- "$path" --version >/dev/null 2>&1; then
+    record_check "findings-setup:$id" error "the probe at $path does not run in the sandbox"
   else
     PADDOCK_SANDBOX="$sandbox" PADDOCK_AUTH_MODE="$id" PADDOCK_RUN_MODE=fd \
       PADDOCK_PROVIDER_FILE="$profile_file" PADDOCK_PROBE="$path" \
@@ -86,10 +88,10 @@ for entry in "${entries[@]}"; do
       bash "$PADDOCK_ROOT/tests/deny/run.sh" >"$PADDOCK_LOG_DIR/deny.log" 2>&1 ||
       record_check "findings-run:$id" error "tests/deny/run.sh exited non-zero"
   fi
-  openshell logs "$sandbox" --source all -n 20000 </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs.txt" 2>&1 || true
-  openshell sandbox delete "$sandbox" </dev/null >/dev/null 2>&1 || true
-  openshell provider delete "$provider" </dev/null >/dev/null 2>&1 || true
-  openshell provider profile delete "$id" </dev/null >/dev/null 2>&1 || true
+  oc logs "$sandbox" --source all -n 20000 </dev/null >"$PADDOCK_LOG_DIR/sandbox-logs.txt" 2>&1 || true
+  oc sandbox delete "$sandbox" </dev/null >/dev/null 2>&1 || true
+  oc provider delete "$provider" </dev/null >/dev/null 2>&1 || true
+  oc provider profile delete "$id" </dev/null >/dev/null 2>&1 || true
 done
 journalctl --user -u openshell-gateway --no-pager -n 2000 >"$out/gateway.log" 2>&1 || true
 echo "findings run complete"

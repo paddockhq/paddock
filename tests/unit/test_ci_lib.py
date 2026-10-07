@@ -204,3 +204,12 @@ def test_publish_logs_seals_them_when_a_must_block_check_did_not_pass(tmp_path):
     assert (results / "cell.private.tgz.age").stat().st_size > 0
     assert not (results / "logs").exists()
     assert not logs.exists()
+
+
+def test_record_check_flattens_carriage_returns(tmp_path):
+    # Tool output such as progress lines can carry \r, which would split a line
+    # of checks.tsv when Python reads it back.
+    checks = tmp_path / "checks.tsv"
+    result = run_lib(tmp_path, "exit 0", f'PADDOCK_CHECKS_FILE="{checks}" record_check demo fail "$(printf "a\rb")"')
+    assert result.returncode == 0, result.stderr
+    assert checks.read_bytes() == b"demo\tfail\ta b\n"
