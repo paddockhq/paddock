@@ -18,18 +18,20 @@ _HTTP = re.compile(
     r"\bHTTP:(?P<method>[A-Z]+) \[[A-Z]+\] (?P<action>ALLOWED|DENIED|BLOCKED) (?P=method) (?P<url>\S+)"
 )
 # Any denial line the patterns above cannot read. It is kept, so callers fail closed.
-_DENIAL = re.compile(r"\b(?P<kind>NET|HTTP):[A-Z]+ \[[A-Z]+\] (?P<action>DENIED|BLOCKED)\b")
+_DENIAL = re.compile(r"\b(?P<kind>NET|HTTP):(?P<op>[A-Z]+) \[[A-Z]+\] (?P<action>DENIED|BLOCKED)\b")
 UNPARSED = "<unparsed>"
 
 
 @dataclass(frozen=True)
 class Event:
     kind: str
+    activity: str
     action: str
     host: str
     port: int | None
     binary: str | None
     method: str | None
+    path: str | None
     line: str
 
 
@@ -41,7 +43,7 @@ def _http_event(match, line):
         return None
     if not url.hostname:
         return None
-    return Event("HTTP", match["action"], url.hostname, port, None, match["method"], line)
+    return Event("HTTP", match["method"], match["action"], url.hostname, port, None, match["method"], url.path, line)
 
 
 def parse_events(text):
@@ -50,26 +52,32 @@ def parse_events(text):
         event = None
         if match := _NET.search(line):
             event = Event(
-                "NET", match["action"], match["host"].strip("[]"), int(match["port"]),
-                match["binary"], None, line,
+                "NET", match["op"], match["action"], match["host"].strip("[]"), int(match["port"]),
+                match["binary"], None, None, line,
             )
         elif match := _NET_HOST.search(line):
-            event = Event("NET", match["action"], match["host"].strip("[]"), None, None, None, line)
+            event = Event("NET", match["op"], match["action"], match["host"].strip("[]"), None, None, None, None, line)
         elif match := _HTTP.search(line):
             event = _http_event(match, line)
         if event is None and (match := _DENIAL.search(line)):
-            event = Event(match["kind"], match["action"], UNPARSED, None, None, None, line)
+            event = Event(match["kind"], match["op"], match["action"], UNPARSED, None, None, None, None, line)
         if event is not None:
             events.append(event)
     return events
 
 
-def select(events, action=None, host=None):
-    return [e for e in events if (action is None or e.action == action) and (host is None or e.host == host)]
+def select(events, action=None, host=None, kind=None, activity=None, port=None, binary=None, path=None):
+    wanted = {"action": action, "host": host, "kind": kind, "activity": activity, "port": port, "binary": binary,
+              "path": path}
+    return [e for e in events if all(value is None or getattr(e, key) == value for key, value in wanted.items())]
 
 
 def _cmd_events(args):
-    events = select(parse_events(Path(args.log).read_text(encoding="utf-8", errors="replace")), args.action, args.host)
+    events = select(
+        parse_events(Path(args.log).read_text(encoding="utf-8", errors="replace")),
+        action=args.action, host=args.host, kind=args.kind, activity=args.activity,
+        port=args.port, binary=args.binary, path=args.path,
+    )
     if args.format == "count":
         print(len(events))
     elif args.format == "hosts":
@@ -86,5 +94,10 @@ def add_commands(sub):
     cmd.add_argument("--log", required=True)
     cmd.add_argument("--action", choices=["ALLOWED", "DENIED", "BLOCKED"])
     cmd.add_argument("--host")
+    cmd.add_argument("--kind", choices=["NET", "HTTP"])
+    cmd.add_argument("--activity", help="NET activity (OPEN, REFUSE, ...) or HTTP method")
+    cmd.add_argument("--port", type=int)
+    cmd.add_argument("--binary", help="real path of the calling executable")
+    cmd.add_argument("--path", help="HTTP request path")
     cmd.add_argument("--format", choices=["lines", "count", "hosts"], default="lines")
     cmd.set_defaults(handler=_cmd_events)

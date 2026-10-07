@@ -242,9 +242,12 @@ The matrix is every affected bundle x {latest OpenShell release, previous minor 
    - **Real request:** the agent makes its normal request to the model API. A pass requires two things. First, the response comes from the upstream service, for example an authentication error body with status 401. Second, the logs contain no `DENIED` line for that request. The status code alone is not enough, because OpenShell's own denials also return 403.
    - **Writable state:** the agent's state directory is writable.
 4. **Must-block tests** (`tests/deny/`, shared).
-   - **How a pass is judged:** every attempt must fail *and* produce a matching log line, either `NET:OPEN ... DENIED` or `HTTP:<METHOD> ... DENIED`, read with `openshell logs <sandbox> --source sandbox`. The log line proves OpenShell blocked the attempt rather than the network failing.
-   - **Run mode 1:** from a process outside the agent's process tree, using `openshell sandbox exec -n <sandbox> --no-login-shell -- <test>`.
-   - **Run mode 2 (worst-case child):** in a variant sandbox where the bundle's rules list the test harness shell in place of the agent binary. Child processes inherit the agent's rules (R2), so this models every tool call a prompt-injected agent could make.
+   - **How a pass is judged:** every attempt must fail, and there must be positive evidence that OpenShell blocked it (ADR 0002):
+     - *Logged denials:* a matching `NET:OPEN ... DENIED`, `NET:REFUSE ... DENIED` or `HTTP:<METHOD> ... DENIED` line, read with `openshell logs <sandbox> --source sandbox`. This covers unlisted hosts, DNS of unlisted names, TCP and IPv6 to IP addresses, and L7 method and path rules. A DNS lookup of an unlisted name still returns a placeholder address, so the `NET:REFUSE` line is the proof.
+     - *Errno-only denials:* OpenShell v0.1.2 writes no log line for UDP, for queries sent straight to an outside resolver, or for Landlock. These pass on the sandbox broker's error (`Destination address required` or `Permission denied`). A write test targets a folder that Unix permissions allow but the policy does not list (`/var/tmp`), after a positive control.
+     - An attempt that fails without that evidence is an error, not a pass.
+   - **Run mode 1:** in the bundle's own sandbox, from a process outside the agent's process tree: a probe uploaded to `/sandbox/.paddock/curl`, run with `openshell sandbox exec -n <sandbox> --no-login-shell -- <test>`.
+   - **Run mode 2 (worst-case child):** in a variant sandbox whose provider profile lists the probe in place of the agent binary. Child processes inherit the agent's rules (R2), so the probe stands for every tool call a prompt-injected agent could make. An allowed control request must be logged as ALLOWED in the same sandbox, or the mode-2 results are an error. (Listing the probe rather than a shell keeps unrelated tools out of the variant: in images where `/bin/sh` is busybox, listing the shell would grant every busybox command.)
    - **Initial catalog:**
      - a host that is not listed
      - a disallowed method or path on an allowed host
@@ -264,7 +267,7 @@ The matrix is every affected bundle x {latest OpenShell release, previous minor 
 
 ### 7.5 Findings job
 
-A manually triggered job runs the must-block suite against NVIDIA's unmodified example provider profiles. Its output feeds the disclosure process (§9.2); it is never published directly.
+A manually triggered job, on the main branch only, runs the must-block suite against NVIDIA's unmodified example provider profiles. It also surveys which HTTP methods each endpoint lets a child process use. A findings image starts from the OpenCode bundle's image and has the probe copied to a listed binary path of each profile, so each profile's own rules apply to it. Its output feeds the disclosure process (§9.2) and is never published directly. Job logs and artifacts of a public repository are visible to any signed-in user, so the job prints no outcome and uploads only an archive encrypted with `age` to the maintainer's public key (`.github/findings-recipients.txt`).
 
 ### 7.6 Failure handling
 
@@ -272,7 +275,7 @@ A manually triggered job runs the must-block suite against NVIDIA's unmodified e
   - The nightly run marks the bundle as broken for that version in `COMPATIBILITY.md`.
   - It opens an issue labelled with the bundle.
   - Other bundles are unaffected.
-- **A must-block test passes, meaning access leaked:** this is a security issue. It is handled privately (§9.2), never as a public issue.
+- **A must-block test passes, meaning access leaked:** this is a security issue. It is handled privately (§9.2), never as a public issue. CI results on this public repository are public, so CI withholds the details of any must-block check that does not pass: the public cell result shows one `deny` line, and the cell's logs are encrypted with `age` to the maintainer's key and the plaintext deleted.
 
 ## 8. Releases and supply chain
 

@@ -99,7 +99,7 @@ jobs:
         with:
           name: cell-${{ matrix.bundle }}--${{ matrix.openshell_version }}--${{ matrix.runner }}
           path: results/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   report:

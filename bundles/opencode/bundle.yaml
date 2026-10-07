@@ -8,6 +8,9 @@ agent:
 distribution: upstream
 image: ghcr.io/anomalyco/opencode:2.0.21@sha256:6d3cebbaaeed11b9dd1ea6d2ca8a3ec17eb548c5aed37e17c7ae80fd8b2f22b2
 revision: 1
+# ADR 0001: the v0.0.116 supervisor needs iproute2 inside the image, which this
+# Alpine image lacks; the report shows v0.0.x as unsupported.
+openshell_min_version: "v0.1.0"
 command: [opencode]
 version_command: [opencode, --version]
 env:

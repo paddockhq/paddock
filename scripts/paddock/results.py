@@ -31,7 +31,24 @@ def cell_status(checks):
     return "pass"
 
 
+# Spec 7.6 and 9.2: a must-block check that does not pass may describe an unfixed
+# OpenShell weakness, and CI results on this public repo are public. Such checks
+# are folded into one line without details; run-cell.sh encrypts the raw logs
+# for the maintainer.
+WITHHELD = "one or more must-block checks did not pass; details are encrypted for the maintainer (spec 7.6)"
+
+
+def public_checks(checks):
+    deny = [check for check in checks if check["name"].startswith("deny-")]
+    if all(check["status"] in ("pass", "skip") for check in deny):
+        return checks
+    status = "fail" if any(check["status"] == "fail" for check in deny) else "error"
+    others = [check for check in checks if not check["name"].startswith("deny-")]
+    return others + [{"name": "deny", "status": status, "detail": WITHHELD}]
+
+
 def cell_result(bundle_name, version, runner, checks):
+    checks = public_checks(checks)
     return {
         "bundle": bundle_name,
         "openshell_version": version,

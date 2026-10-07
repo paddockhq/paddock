@@ -104,3 +104,63 @@ def test_unrecognised_denial_lines_are_kept_as_unparsed_denials():
 
 def test_unrecognised_allowed_lines_are_ignored():
     assert parse_events("NET:OPEN [INFO] ALLOWED weird line without arrow") == []
+
+
+# Lines captured by the M3 spike (docs/decisions/0002-must-block-observations.md).
+PROBE = "/sandbox/.paddock/curl"
+SPIKE_LINES = [
+    "[1.0] [sandbox] [OCSF ] [ocsf] NET:REFUSE [MED] DENIED pd-1-a.example.com [reason:policy_dns_ineligible]",
+    f"[1.1] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED {PROBE}(0) -> pd-1-a.example.com:443 "
+    "[reason:transparent_tcp_policy_denied]",
+    f"[1.2] [sandbox] [OCSF ] [ocsf] NET:OPEN [MED] DENIED {PROBE}(0) -> 2606:4700:4700::1111:443 "
+    "[reason:transparent_tcp_policy_denied]",
+    f"[1.3] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] ALLOWED {PROBE}(0) -> openrouter.ai:443 "
+    "[policy:_provider_x engine:opa]",
+    "[1.4] [sandbox] [OCSF ] [ocsf] HTTP:POST [INFO] ALLOWED POST http://openrouter.ai:443/api/v1/chat/completions "
+    "[policy:_provider_x engine:l7]",
+    "[1.5] [sandbox] [OCSF ] [ocsf] HTTP:DELETE [MED] DENIED DELETE http://openrouter.ai:443/api/v1/chat/completions "
+    "[policy:_provider_x engine:l7] [reason:L7_REQUEST deny DELETE openrouter.ai:443/api/v1/chat/completions]",
+    "[1.6] [sandbox] [OCSF ] [ocsf] NET:OPEN [INFO] 127.0.0.1:17670",
+    "[1.7] [sandbox] [OCSF ] [ocsf] SSH:OPEN [INFO] ALLOWED",
+]
+
+
+def test_events_record_their_activity():
+    events = parse_events("\n".join(SPIKE_LINES))
+    assert [(e.kind, e.activity, e.action, e.host, e.port) for e in events] == [
+        ("NET", "REFUSE", "DENIED", "pd-1-a.example.com", None),
+        ("NET", "OPEN", "DENIED", "pd-1-a.example.com", 443),
+        ("NET", "OPEN", "DENIED", "2606:4700:4700::1111", 443),
+        ("NET", "OPEN", "ALLOWED", "openrouter.ai", 443),
+        ("HTTP", "POST", "ALLOWED", "openrouter.ai", 443),
+        ("HTTP", "DELETE", "DENIED", "openrouter.ai", 443),
+    ]
+
+
+def test_select_filters_by_kind_activity_port_and_binary():
+    events = parse_events("\n".join(SPIKE_LINES))
+    assert len(select(events, action="DENIED", kind="NET", activity="OPEN", port=443, binary=PROBE)) == 2
+    assert len(select(events, kind="NET", activity="REFUSE", host="pd-1-a.example.com")) == 1
+    assert len(select(events, kind="HTTP", activity="DELETE", action="DENIED", host="openrouter.ai")) == 1
+    assert select(events, binary="/usr/bin/curl") == []
+
+
+def test_events_command_accepts_the_new_filters(tmp_path, capsys):
+    log = tmp_path / "sandbox.log"
+    log.write_text("\n".join(SPIKE_LINES) + "\n", encoding="utf-8")
+    args = ["events", "--log", str(log), "--action", "DENIED", "--kind", "NET", "--activity", "OPEN",
+            "--port", "443", "--binary", PROBE, "--format", "count"]
+    assert main(args) == 0
+    assert capsys.readouterr().out == "2\n"
+
+
+def test_unparsed_denials_keep_an_unknown_activity():
+    events = parse_events("HTTP:GET [MED] DENIED GET http://[::1:443/x [policy:-]")
+    assert [(e.kind, e.activity, e.host) for e in events] == [("HTTP", "GET", "<unparsed>")]
+
+
+def test_http_events_carry_their_path():
+    events = parse_events("\n".join(SPIKE_LINES))
+    assert [e.path for e in events if e.kind == "HTTP"] == ["/api/v1/chat/completions"] * 2
+    assert len(select(events, kind="HTTP", path="/api/v1/chat/completions", action="DENIED")) == 1
+    assert {e.path for e in events if e.kind == "NET"} == {None}

@@ -176,3 +176,13 @@ def test_dummy_credential_rejects_shell_and_space_characters(make_bundle, valid_
     valid_meta["auth"][0]["dummy_credential"] = "sk $(id)"
     with pytest.raises(BundleError, match="dummy_credential"):
         load_bundle(make_bundle(valid_meta))
+
+
+def test_crlf_is_reported_even_when_the_schema_fails(make_bundle, valid_meta):
+    # One round trip shows every problem, not the schema errors first and CRLF later.
+    del valid_meta["image"]
+    bundle_dir = make_bundle(valid_meta, files={"tests/allow.sh": "#!/usr/bin/env bash\r\n"})
+    with pytest.raises(BundleError) as exc:
+        load_bundle(bundle_dir)
+    assert "'image' is a required property" in str(exc.value)
+    assert "CRLF line endings in tests/allow.sh" in str(exc.value)
