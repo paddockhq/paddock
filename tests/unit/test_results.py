@@ -90,9 +90,11 @@ def test_must_block_details_are_withheld_when_a_deny_check_does_not_pass():
         {"name": "deny-m2-control:api-key", "status": "error", "detail": "only 0 of 1 allowed requests"},
     ]
     result = cell_result("demo", "v0.1.2", "ubuntu-24.04", checks)
-    assert result["status"] == "fail"
+    # Even "fail" (a confirmed leak) versus "error" (inconclusive) is withheld:
+    # publicly, every withheld must-block result is an error.
+    assert result["status"] == "error"
     assert [check["name"] for check in result["checks"]] == ["version:api-key", "deny"]
-    assert result["checks"][1]["status"] == "fail"
+    assert result["checks"][1]["status"] == "error"
     assert "2606" not in json.dumps(result)
     assert "ipv6" not in json.dumps(result)
 
